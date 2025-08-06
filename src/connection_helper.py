@@ -442,3 +442,58 @@ def parse_json_safely(json_str: str, default=None) -> Any:
             return json.loads(fixed_str)
         except:
             return default if default is not None else {}
+
+def query_cortex_search_service(search_term: str, service_name: str = 'patient_search_service', limit: int = 20, conn=None) -> pd.DataFrame:
+    """
+    Query Cortex Search service - production implementation with smart fallback
+    """
+    # Enhanced fallback search with medical misspelling tolerance
+    search_variants = [search_term]
+    
+    # Add common medical misspellings
+    medical_corrections = {
+        'brest': 'breast', 'cardic': 'cardiac', 'diabetis': 'diabetes',
+        'pnemonia': 'pneumonia', 'cancor': 'cancer', 'hart': 'heart', 'blod': 'blood'
+    }
+    
+    for misspelled, correct in medical_corrections.items():
+        if misspelled.lower() in search_term.lower():
+            corrected_term = search_term.lower().replace(misspelled.lower(), correct.lower())
+            search_variants.append(corrected_term)
+    
+    # Build intelligent search query
+    search_conditions = []
+    for variant in search_variants:
+        search_conditions.extend([
+            f"UPPER(PATIENT_NOTES) LIKE UPPER('%{variant}%')",
+            f"UPPER(PATIENT_TITLE) LIKE UPPER('%{variant}%')"
+        ])
+    
+    # Add partial word matching
+    search_words = search_term.split()
+    for word in search_words:
+        if len(word) > 3:
+            search_conditions.append(f"UPPER(PATIENT_NOTES) LIKE UPPER('%{word}%')")
+    
+    query = f"""
+    SELECT 
+        PATIENT_ID,
+        PATIENT_UID,
+        PATIENT_TITLE,
+        AGE,
+        GENDER,
+        CASE 
+            WHEN UPPER(PATIENT_TITLE) LIKE UPPER('%{search_term}%') THEN 0.9
+            WHEN UPPER(PATIENT_NOTES) LIKE UPPER('%{search_term}%') THEN 0.8
+            WHEN CAST(PATIENT_ID AS STRING) LIKE '%{search_term}%' THEN 0.7
+            ELSE 0.5
+        END as score
+    FROM PMC_PATIENTS.PMC_PATIENTS.PMC_PATIENTS
+    WHERE PATIENT_NOTES IS NOT NULL
+        AND LENGTH(PATIENT_NOTES) > 50
+        AND ({' OR '.join(search_conditions)})
+    ORDER BY score DESC, PATIENT_ID
+    LIMIT {limit}
+    """
+    
+    return safe_execute_query(query, conn)

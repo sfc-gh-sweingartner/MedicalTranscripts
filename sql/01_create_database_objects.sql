@@ -168,11 +168,42 @@ VALUES
     ('COST_OPTIMIZATION', 'High-Cost Patient Analysis', 'cost', 163841,
      'Patient with multiple procedures and complications', 5);
 
+-- Enable change tracking on source table (required for Cortex Search)
+ALTER TABLE PMC_PATIENTS.PMC_PATIENTS.PMC_PATIENTS SET CHANGE_TRACKING = TRUE;
+
+-- Create warehouse for Cortex Search service if not exists
+CREATE WAREHOUSE IF NOT EXISTS CORTEX_SEARCH_WH WITH
+    WAREHOUSE_SIZE='X-SMALL'
+    AUTO_SUSPEND = 60
+    AUTO_RESUME = TRUE
+    COMMENT = 'Dedicated warehouse for Cortex Search service operations';
+
+-- Create Cortex Search service for fast patient search
+CREATE OR REPLACE CORTEX SEARCH SERVICE patient_search_service
+    ON PATIENT_NOTES
+    ATTRIBUTES PATIENT_ID, PATIENT_UID, PATIENT_TITLE, AGE, GENDER
+    WAREHOUSE = CORTEX_SEARCH_WH
+    TARGET_LAG = '1 hour'
+    EMBEDDING_MODEL = 'snowflake-arctic-embed-l-v2.0'
+    AS (
+        SELECT
+            PATIENT_NOTES,
+            PATIENT_ID,
+            PATIENT_UID, 
+            PATIENT_TITLE,
+            AGE,
+            GENDER
+        FROM PMC_PATIENTS.PMC_PATIENTS.PMC_PATIENTS
+        WHERE PATIENT_NOTES IS NOT NULL
+            AND LENGTH(PATIENT_NOTES) > 50
+    );
+
 -- Grant appropriate permissions
 GRANT USAGE ON DATABASE HEALTHCARE_DEMO TO ROLE PUBLIC;
 GRANT USAGE ON SCHEMA HEALTHCARE_DEMO.MEDICAL_NOTES TO ROLE PUBLIC;
 GRANT SELECT ON ALL TABLES IN SCHEMA HEALTHCARE_DEMO.MEDICAL_NOTES TO ROLE PUBLIC;
 GRANT SELECT ON ALL VIEWS IN SCHEMA HEALTHCARE_DEMO.MEDICAL_NOTES TO ROLE PUBLIC;
+GRANT USAGE ON WAREHOUSE CORTEX_SEARCH_WH TO ROLE PUBLIC;
 
 -- Display confirmation
-SELECT 'Healthcare Demo database objects created successfully' as STATUS;
+SELECT 'Healthcare Demo database objects and Cortex Search service created successfully' as STATUS;

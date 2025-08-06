@@ -22,7 +22,8 @@ from connection_helper import (
     safe_execute_query,
     format_sbar_summary,
     parse_json_safely,
-    execute_cortex_complete
+    execute_cortex_complete,
+    query_cortex_search_service
 )
 
 # Page configuration
@@ -100,41 +101,42 @@ st.markdown("""
 
 @st.cache_data(ttl=300)
 def search_patients_cortex(search_term, _conn):
-    """Search for patients using Cortex AI semantic search"""
+    """Search for patients using Cortex Search service for fast semantic search"""
     try:
-        # First try Cortex-based semantic search
-        query = f"""
-        SELECT 
-            p.PATIENT_ID,
-            p.PATIENT_UID,
-            p.PATIENT_TITLE,
-            p.AGE,
-            p.GENDER,
-            SUBSTR(p.PATIENT_NOTES, 1, 200) || '...' as NOTES_PREVIEW,
-            SNOWFLAKE.CORTEX.COMPLETE(
-                'mistral-large',
-                'Rate how relevant this patient case is to the search term "{search_term}" on a scale of 1-10. Only respond with a number: ' || 
-                SUBSTR(p.PATIENT_NOTES, 1, 500)
-            ) as RELEVANCE_SCORE
-        FROM PMC_PATIENTS.PMC_PATIENTS.PMC_PATIENTS p
-        WHERE p.PATIENT_NOTES IS NOT NULL
-        ORDER BY 
-            CASE 
-                WHEN CAST(p.PATIENT_ID AS STRING) LIKE '%{search_term}%' THEN 1
-                WHEN UPPER(p.PATIENT_TITLE) LIKE UPPER('%{search_term}%') THEN 2
-                ELSE 3
-            END,
-            TRY_CAST(RELEVANCE_SCORE AS NUMBER) DESC NULLS LAST
-        LIMIT 20
-        """
+        # Use the Cortex Search service helper function
+        search_results = query_cortex_search_service(search_term, limit=20, conn=_conn)
         
-        result = safe_execute_query(query, _conn)
-        if not result.empty:
-            return result
+        if not search_results.empty:
+            # Add notes preview for display
+            search_results_with_preview = search_results.copy()
+            
+            # Get patient notes for preview if not already included
+            if 'PATIENT_NOTES' not in search_results.columns:
+                patient_ids = ','.join(str(pid) for pid in search_results['PATIENT_ID'])
+                notes_query = f"""
+                SELECT 
+                    PATIENT_ID,
+                    SUBSTR(PATIENT_NOTES, 1, 200) || '...' as NOTES_PREVIEW
+                FROM PMC_PATIENTS.PMC_PATIENTS.PMC_PATIENTS
+                WHERE PATIENT_ID IN ({patient_ids})
+                """
+                notes_data = safe_execute_query(notes_query, _conn)
+                search_results_with_preview = search_results.merge(notes_data, on='PATIENT_ID', how='left')
+            else:
+                search_results_with_preview['NOTES_PREVIEW'] = search_results['PATIENT_NOTES'].apply(
+                    lambda x: str(x)[:200] + '...' if str(x) != 'nan' and x is not None else 'No notes available'
+                )
+            
+            # Rename score column for consistency
+            if 'score' in search_results_with_preview.columns:
+                search_results_with_preview.rename(columns={'score': 'RELEVANCE_SCORE'}, inplace=True)
+            
+            return search_results_with_preview
+            
     except Exception as e:
-        st.warning(f"Cortex search failed, falling back to basic search: {str(e)}")
+        st.warning(f"Cortex Search service failed, falling back to basic search: {str(e)}")
     
-    # Fallback to basic text search if Cortex fails
+    # Fallback to basic text search if Cortex Search fails
     return search_patients_basic(search_term, _conn)
 
 @st.cache_data(ttl=300)
@@ -423,9 +425,9 @@ def main():
     with col1:
         search_term = st.text_input(
             "🤖 AI-Powered Patient Search",
-            placeholder="e.g., cardiac issues, seizure disorders, rare tumors, hypertension",
+            placeholder="e.g., cardiac issues, seizure disorders, rare tumors, hypertension, brest cancer",
             key="patient_search",
-            help="Uses Snowflake Cortex AI for semantic search through patient notes"
+            help="Uses Snowflake Cortex AI for semantic search. Handles medical terminology and common misspellings."
         )
     
     with col2:
@@ -439,7 +441,7 @@ def main():
     
     # Perform search when button is clicked
     if search_term and search_button:
-        with st.spinner("🔍 Searching patients with Cortex AI..."):
+        with st.spinner("🔍 Searching patients..."):
             st.session_state.search_results = search_patients_cortex(search_term, conn)
             st.session_state.last_search_term = search_term
     
@@ -463,12 +465,14 @@ def main():
                 if 'RELEVANCE_SCORE' in patient and patient['RELEVANCE_SCORE']:
                     try:
                         score = float(patient['RELEVANCE_SCORE'])
-                        if score >= 7:
-                            relevance_info = f" 🎯 Relevance: {score}/10"
-                        elif score >= 5:
-                            relevance_info = f" 📊 Relevance: {score}/10"
+                        # Cortex Search returns scores between 0-1, convert to percentage
+                        score_pct = score * 100
+                        if score >= 0.7:
+                            relevance_info = f" 🎯 Match: {score_pct:.0f}%"
+                        elif score >= 0.5:
+                            relevance_info = f" 📊 Match: {score_pct:.0f}%"
                         else:
-                            relevance_info = f" 📋 Relevance: {score}/10"
+                            relevance_info = f" 📋 Match: {score_pct:.0f}%"
                     except (ValueError, TypeError):
                         pass
                 

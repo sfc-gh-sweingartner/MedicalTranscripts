@@ -566,7 +566,6 @@ def main():
                     if results:
                         st.session_state.processing_results = results
                         st.success("✅ Analysis complete!")
-                        st.balloons()
                     else:
                         st.error("❌ Processing failed. Please try again.")
             else:

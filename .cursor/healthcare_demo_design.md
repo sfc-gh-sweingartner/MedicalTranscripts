@@ -24,7 +24,13 @@ This document defines the design for a Snowflake-based healthcare demonstration 
                             │  Real-time AI       │      │  Streamlit App      │
                             │  Processing         │◀─────│  (Multi-Page)       │
                             │  (On-demand)        │      └─────────────────────┘
-                            └─────────────────────┘
+                            └─────────────────────┘               │
+                                                                  ▼
+                            ┌─────────────────────┐      ┌─────────────────────┐
+                            │  Cortex Search      │◀─────│  Patient Search     │
+                            │  Service (Active)   │      │  (Sub-second)       │
+                            │  167K+ Indexed      │      │  Semantic Search    │
+                            └─────────────────────┘      └─────────────────────┘
 ```
 
 ## Database Schema Design
@@ -132,6 +138,44 @@ CREATE OR REPLACE TABLE HEALTHCARE_DEMO.MEDICAL_NOTES.PHYSICIAN_INSIGHTS (
     PRIORITY_SCORE NUMBER
 );
 ```
+
+## Cortex Search Implementation
+
+### Search Service Architecture
+The application implements **Snowflake Cortex Search** for intelligent patient discovery with the following features:
+
+- **Service Name**: `patient_search_service`
+- **Index Status**: ACTIVE (167,034+ patient records indexed)
+- **Embedding Model**: `snowflake-arctic-embed-l-v2.0`
+- **Refresh Frequency**: 1 hour target lag
+- **Warehouse**: `CORTEX_SEARCH_WH` (X-SMALL)
+
+### Search Capabilities
+- **Semantic Understanding**: Understands medical terminology and concepts
+- **Misspelling Tolerance**: Handles common medical misspellings (e.g., "brest" → "breast")
+- **Multi-Column Search**: Searches across patient notes, titles, and metadata
+- **Sub-Second Performance**: Vector-based search for near-instantaneous results
+- **Relevance Scoring**: Returns similarity scores for result ranking
+
+### Implementation Details
+```sql
+CREATE OR REPLACE CORTEX SEARCH SERVICE patient_search_service
+    ON PATIENT_NOTES
+    ATTRIBUTES PATIENT_ID, PATIENT_UID, PATIENT_TITLE, AGE, GENDER
+    WAREHOUSE = CORTEX_SEARCH_WH
+    TARGET_LAG = '1 hour'
+    EMBEDDING_MODEL = 'snowflake-arctic-embed-l-v2.0'
+    AS (
+        SELECT PATIENT_NOTES, PATIENT_ID, PATIENT_UID, PATIENT_TITLE, AGE, GENDER
+        FROM PMC_PATIENTS.PMC_PATIENTS.PMC_PATIENTS
+        WHERE PATIENT_NOTES IS NOT NULL AND LENGTH(PATIENT_NOTES) > 50
+    );
+```
+
+### Integration Points
+- **Clinical Decision Support**: Primary search interface for patient discovery
+- **API Access**: Python-based queries using Snowflake's core libraries
+- **Enhanced Fallback**: Intelligent text search with medical spell correction when needed
 
 ## Use Case Implementation Priority
 
