@@ -1,0 +1,108 @@
+# Cursor Rules for Superannuation Transcripts Demo
+
+## Project Overview
+You are helping build a demo for a Superannuation Fund showing how Snowflake can leverage customer call transcripts for churn prediction and personalized engagement. This demo showcases both Snowflake's ML and AI capabilities in a cohesive workflow. This is a DEMO, not production code - shortcuts and simplifications are encouraged.
+
+## Cursor Behavior Rules
+1. **Decision Making**: If given a challenging task with multiple options or confusion, ask questions and/or give options before proceeding with code changes
+2. **Development Phases**: 
+   - Early tasks: Creativity and exploration are welcome
+   - Debugging/testing phase: Make minimal changes to fix problems, avoid unnecessary creativity
+3. **Rules Conflict**: If asked to do something conflicting with these rules, update the relevant rules files and ask for review
+
+## SQL Execution Guidelines
+4. **Direct SQL Execution**: When SQL files need to be executed, create Python deployment scripts that:
+   - Use snowflake.connector and tomli for connections
+   - Read from `/Users/sweingartner/.snowflake/config.toml`
+   - Execute SQL files directly rather than asking user to run them
+   - Include proper error handling and verification
+   - Provide clear success/failure feedback
+
+## Technical Requirements
+
+### Platform & Deployment
+- **Primary**: Streamlit in Snowflake (hosted)
+- **Secondary**: Local development using Streamlit
+- **Connection Pattern**: Use the dual-connection approach from Reference/nation_app.py
+- **Python Libraries**: Limit to anaconda channel: https://repo.anaconda.com/pkgs/snowflake/
+- **SQL Execution**: Use Python scripts with snowflake.connector for direct SQL execution
+
+### Snowflake Environment
+- **Database**: SUPERANNUATION
+- **Schema**: TRANSCRIPTS
+- **Stage**: TRANSCRIPTS
+- **Warehouse**: MYWH (existing)
+- **Account**: demo_sweingartner
+- **Config File**: `/Users/sweingartner/.snowflake/config.toml`
+
+### Data Architecture - Hybrid AI + ML Approach
+- **Source Data**: /Users/sweingartner/Cursor/SuperannuationTranscripts/call_transcripts.json
+- **AI Processing**: Snowflake Cortex AI (claude-4-sonnet) for customer insights and NBA generation
+- **ML Processing**: SNOWFLAKE.ML.CLASSIFICATION for quantitative churn prediction
+- **Hybrid Workflow**: ML models predict churn risk scores, AI generates personalized action plans
+- **Real-time Simulation**: Button-triggered processing to simulate live transcript analysis
+
+## Development Guidelines
+
+### Code Standards
+- **Comments**: Add extensive comments for human readability
+- **Error Handling**: Include proper error handling, especially for AI/ML service calls
+- **Demo-Friendly**: Design for predictable demo scenarios with preset examples
+- **Performance**: Optimize for demo speed, not production scale
+- **SQL Deployment**: Create Python scripts for SQL execution with proper verification
+
+### Hybrid AI + ML Integration
+- **Churn Prediction**: Use SNOWFLAKE.ML.CLASSIFICATION for data-driven churn risk scoring
+- **Customer Insights**: Use AI_AGG and AI_CLASSIFY for cross-transcript customer analysis
+- **Personalized NBA**: Use AI_COMPLETE with claude-4-sonnet for contextual recommendations
+- **Sentiment Analysis**: Enhanced with AI_CLASSIFY for emotional state classification
+- **Model Training**: Automated ML model training with proper feature engineering
+- **Fallback**: Handle AI/ML service failures gracefully with backup logic
+
+### UI/UX Requirements
+- **Modern Design**: Beautiful, modern UI with good UX practices
+- **Responsive**: Works well in both local and Snowflake environments
+- **Two Views**: Front-line advisor view and manager dashboard view
+- **Real-time Feel**: Simulate real-time processing with progress indicators
+- **ML Insights**: Display model performance metrics and confidence scores
+- **AI Explanations**: Show reasoning behind NBA recommendations
+
+## File Organization
+- Keep demo-specific configurations separate from core logic
+- Use clear, descriptive naming conventions
+- Maintain connection compatibility between local and Snowflake deployment
+- Store deployment scripts in `scripts/` directory
+- Separate ML model files from AI processing logic
+
+## Testing Approach
+- **Local Testing**: Must work on laptop environment
+- **Snowflake Testing**: Must work in Streamlit in Snowflake
+- **Demo Scenarios**: Create repeatable demo flows with known outcomes
+- **Error Scenarios**: Test AI/ML service failures and data issues
+- **Model Validation**: Include ML model performance verification
+- **SQL Verification**: Include verification queries in deployment scripts
+
+## Documentation
+- **End User Guide**: Single page within the app explaining how to use it
+- **Code Comments**: Extensive inline documentation
+- **Demo Script**: Clear instructions for presenting the hybrid AI+ML capabilities
+
+## Git Repository
+- **Repo**: https://github.com/sfc-gh-sweingartner/SuperannuationTranscripts
+- **Deployment**: Authorized to deploy changes automatically
+- **Script**: Use/modify git_project_setup.sh as needed
+
+## Demo Focus Enhancements
+- **Real ML Models**: Use SNOWFLAKE.ML.CLASSIFICATION for actual churn prediction
+- **Sophisticated AI**: Leverage advanced Cortex AI functions for deep customer insights
+- **Hybrid Approach**: Combine quantitative ML predictions with qualitative AI recommendations
+- **Executive Impact**: Showcase both ML and AI capabilities in integrated workflow
+- **Simplified Deployment**: Automated model training and deployment for demo reliability
+- **Mock Real-time**: Simulate real-time processing with realistic ML inference times
+
+## Key Success Criteria
+1. Demo runs smoothly showcasing both ML and AI capabilities
+2. Shows clear business value of integrated Snowflake AI/ML platform
+3. Demonstrates sophisticated churn prediction with explainable AI insights
+4. Provides compelling personalized NBA scenarios with ML confidence scores
+5. Works in both local and Snowflake environments with consistent performance 
