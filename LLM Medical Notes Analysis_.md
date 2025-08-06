@@ -1,5 +1,51 @@
 
 
+My prompt to Gemini: 
+I am a sales engineer at Snowflake. I want to produce a demonstration to a healthcare company where they can use LLM's (e.g. Claude or Gemini) to interrogate medical notes. I have real medical notes (open source pmc-patients) in a table (where the patient name has been masked) and it is pasted at the bottom. Can you give me use cases of what sorts of prompts / benefits / use cases we can deliver where the LLM's find some interesting information and present it to a medical professional via a streamlit app. Please make a list of 10 to 30 possible use cases and also indicate the value level (high, medium, low) in improving patient outcomes (e.g. saving lives) or in cutting healthcare costs. Users of this stremlit app could be doctors, hospital administrators, aged care facility workers, government ministers of health, healthcare data analysts, mdeical researchers, and other medical professionals. Maybe split out the use cases based on the type of user. Also maybe give some sample prompts per use case of what the LLM should be tasked to do with the medical notes. Here is some high level info about the dataset that is in my environment: Table Schema
+
+The table contains 167,034 rows with the following columns:
+
+PATIENT_ID (NUMBER) - Unique identifier for each patient
+
+PATIENT_UID (TEXT) - Another patient identifier in format like "3808022-1"
+
+PMID (NUMBER) - PubMed ID of the associated medical article
+
+FILE_PATH (TEXT) - Path to the source XML file
+
+PATIENT_TITLE (TEXT) - Title of the medical case/article
+
+PATIENT_NOTES (TEXT) - Detailed clinical notes and case description
+
+AGE (TEXT) - Patient age information (stored as formatted text like "[[11.0, 'year']]")
+
+GENDER (TEXT) - Patient gender (M/F)
+
+RELEVANT_ARTICLES (TEXT) - JSON-like string of related PMIDs with relevance scores
+
+SIMILAR_PATIENTS (TEXT) - JSON-like string of similar patient cases
+
+Sample Data
+
+The table contains medical case studies from PMC (PubMed Central) articles. Here are some examples of the cases:
+
+11-year-old boy with multicentric peripheral ossifying fibroma
+
+41-year-old female with peripheral odontogenic myxoma
+
+13-year-old male with gingival melanoacanthoma
+
+62-year-old female with root coverage procedure
+
+66-year-old gentleman with seizures and cardiac arrhythmia
+
+The patient notes contain detailed clinical descriptions, treatment procedures, follow-up information, and outcomes. This appears to be a rich dataset for medical research, containing anonymized patient cases extracted from published medical literature.
+
+The RELEVANT_ARTICLES and SIMILAR_PATIENTS fields suggest this dataset has been processed to find connections between cases and related literature, making it valuable for medical AI and research applications.
+
+
+Answer:  
+
 # **The Synthesis Engine: A Framework for Activating Clinical Data with Generative AI and the Data Cloud**
 
 ## **Part I: The Generative AI Imperative in Modern Healthcare**
