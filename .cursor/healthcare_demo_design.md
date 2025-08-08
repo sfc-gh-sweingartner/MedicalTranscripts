@@ -15,21 +15,34 @@ This document defines the design for a Snowflake-based healthcare demonstration 
 
 ```
 ┌─────────────────────┐     ┌──────────────────────┐     ┌─────────────────────┐
-│   PMC_PATIENTS      │────▶│   Batch AI Pipeline  │────▶│  Enriched Tables    │
-│   (167K records)    │     │   (Cortex AI)        │     │  (Pre-computed)     │
+│   PMC_PATIENTS      │────▶│   Data Subset        │────▶│  PATIENT_SUBSET     │
+│   (167K records)    │     │   (1K records)       │     │  (Clean age data)   │
 └─────────────────────┘     └──────────────────────┘     └─────────────────────┘
-                                      │                              │
-                                      │                              ▼
+                                                                    │
+                                      ┌─────────────────────────────┘
+                                      │
                             ┌─────────────────────┐      ┌─────────────────────┐
-                            │  Real-time AI       │      │  Streamlit App      │
-                            │  Processing         │◀─────│  (Multi-Page)       │
-                            │  (On-demand)        │      └─────────────────────┘
-                            └─────────────────────┘               │
-                                                                  ▼
-                            ┌─────────────────────┐      ┌─────────────────────┐
-                            │  Cortex Search      │◀─────│  Patient Search     │
-                            │  Service (Active)   │      │  (Sub-second)       │
-                            │  167K+ Indexed      │      │  Semantic Search    │
+                            │  Batch AI Pipeline  │◀─────│  PATIENT_SUBSET     │
+                            │  (Cortex AI)        │      │  (1K records)       │
+                            │  - Configurable     │      └─────────────────────┘
+                            │    prompts          │               │
+                            └─────────────────────┘               ▼
+                                      │                  ┌─────────────────────┐
+                                      │                  │  Enriched Tables    │
+                                      ▼                  │  (Pre-computed)     │
+                            ┌─────────────────────┐      └─────────────────────┘
+                            │  Real-time AI       │               │
+                            │  Processing         │               ▼
+                            │  (On-demand)        │      ┌─────────────────────┐
+                            └─────────────────────┘      │  Streamlit App      │
+                                      ▲                  │  (Multi-Page)       │
+                                      └──────────────────└─────────────────────┘
+                                                                  │
+                            ┌─────────────────────┐               ▼
+                            │  Cortex Search      │      ┌─────────────────────┐
+                            │  Service            │◀─────│  Patient Search     │
+                            │  (1K Indexed)       │      │  (Sub-second)       │
+                            │  Semantic Search    │      │  Semantic Search    │
                             └─────────────────────┘      └─────────────────────┘
 ```
 
@@ -40,6 +53,24 @@ create a database named HEALTHCARE_DEMO
 create a schema named MEDICAL_NOTES
 
 use the snowflake warehouse MYWH
+
+### Patient Subset Table
+
+```sql
+-- Subset of patients for development and demonstration
+CREATE OR REPLACE TABLE HEALTHCARE_DEMO.MEDICAL_NOTES.PATIENT_SUBSET (
+    PATIENT_ID NUMBER PRIMARY KEY,
+    PATIENT_UID VARCHAR,
+    PATIENT_TITLE TEXT,
+    PATIENT_NOTES TEXT,
+    AGE_YEARS NUMBER(5,2), -- Cleaned age in decimal years (e.g., 12.5)
+    AGE_ORIGINAL VARCHAR, -- Original age string for reference
+    GENDER VARCHAR,
+    SIMILAR_PATIENTS VARIANT,
+    RELEVANT_ARTICLES VARIANT,
+    CREATED_DATE TIMESTAMP_NTZ DEFAULT CURRENT_TIMESTAMP()
+);
+```
 
 ### Core Tables
 
@@ -106,6 +137,38 @@ CREATE OR REPLACE TABLE HEALTHCARE_DEMO.MEDICAL_NOTES.REALTIME_ANALYSIS_LOG (
     SUCCESS_FLAG BOOLEAN
 );
 
+-- Drug safety analysis
+CREATE OR REPLACE TABLE HEALTHCARE_DEMO.MEDICAL_NOTES.MEDICATION_ANALYSIS (
+    PATIENT_ID NUMBER PRIMARY KEY,
+    EXTRACTED_MEDICATIONS VARIANT, -- Array of {name, dosage, frequency, route}
+    DRUG_INTERACTIONS VARIANT, -- Array of {drug1, drug2, severity, description}
+    CONTRAINDICATIONS VARIANT, -- Array of {medication, condition, risk_level}
+    POLYPHARMACY_RISK_SCORE NUMBER, -- Risk score based on number and types of meds
+    ANALYSIS_DATE TIMESTAMP_NTZ DEFAULT CURRENT_TIMESTAMP()
+);
+
+-- Cost analysis
+CREATE OR REPLACE TABLE HEALTHCARE_DEMO.MEDICAL_NOTES.COST_ANALYSIS (
+    PATIENT_ID NUMBER PRIMARY KEY,
+    EXTRACTED_PROCEDURES VARIANT, -- Array of {procedure, CPT_code, estimated_cost}
+    EXTRACTED_CONDITIONS VARIANT, -- Array of {condition, ICD10_code, cost_impact}
+    HIGH_COST_INDICATORS VARIANT, -- ICU, surgery, complications, etc.
+    ESTIMATED_ENCOUNTER_COST NUMBER(10,2),
+    COST_CATEGORY VARCHAR, -- 'low', 'medium', 'high', 'very_high'
+    COST_DRIVERS TEXT, -- Narrative explanation
+    ANALYSIS_DATE TIMESTAMP_NTZ DEFAULT CURRENT_TIMESTAMP()
+);
+
+-- Procedure cost reference table
+CREATE OR REPLACE TABLE HEALTHCARE_DEMO.MEDICAL_NOTES.PROCEDURE_COSTS (
+    PROCEDURE_NAME VARCHAR,
+    CPT_CODE VARCHAR,
+    ESTIMATED_COST NUMBER(10,2),
+    COST_RANGE_LOW NUMBER(10,2),
+    COST_RANGE_HIGH NUMBER(10,2),
+    CATEGORY VARCHAR
+);
+
 -- Cohort analysis for population health
 CREATE OR REPLACE TABLE HEALTHCARE_DEMO.MEDICAL_NOTES.COHORT_INSIGHTS (
     COHORT_ID VARCHAR DEFAULT UUID_STRING(),
@@ -145,7 +208,7 @@ CREATE OR REPLACE TABLE HEALTHCARE_DEMO.MEDICAL_NOTES.PHYSICIAN_INSIGHTS (
 The application implements **Snowflake Cortex Search** for intelligent patient discovery with the following features:
 
 - **Service Name**: `patient_search_service`
-- **Index Status**: ACTIVE (167,034+ patient records indexed)
+- **Index Status**: ACTIVE (1,000 patient records from subset)
 - **Embedding Model**: `snowflake-arctic-embed-l-v2.0`
 - **Refresh Frequency**: 1 hour target lag
 - **Warehouse**: `CORTEX_SEARCH_WH` (X-SMALL)
@@ -159,15 +222,19 @@ The application implements **Snowflake Cortex Search** for intelligent patient d
 
 ### Implementation Details
 ```sql
+-- Drop existing service on full dataset
+DROP CORTEX SEARCH SERVICE IF EXISTS patient_search_service;
+
+-- Create new service on subset
 CREATE OR REPLACE CORTEX SEARCH SERVICE patient_search_service
-    ON PATIENT_NOTES
-    ATTRIBUTES PATIENT_ID, PATIENT_UID, PATIENT_TITLE, AGE, GENDER
+    ON PATIENT_SUBSET
+    ATTRIBUTES PATIENT_ID, PATIENT_UID, PATIENT_TITLE, AGE_YEARS, GENDER
     WAREHOUSE = CORTEX_SEARCH_WH
     TARGET_LAG = '1 hour'
     EMBEDDING_MODEL = 'snowflake-arctic-embed-l-v2.0'
     AS (
-        SELECT PATIENT_NOTES, PATIENT_ID, PATIENT_UID, PATIENT_TITLE, AGE, GENDER
-        FROM PMC_PATIENTS.PMC_PATIENTS.PMC_PATIENTS
+        SELECT PATIENT_NOTES, PATIENT_ID, PATIENT_UID, PATIENT_TITLE, AGE_YEARS, GENDER
+        FROM HEALTHCARE_DEMO.MEDICAL_NOTES.PATIENT_SUBSET
         WHERE PATIENT_NOTES IS NOT NULL AND LENGTH(PATIENT_NOTES) > 50
     );
 ```
@@ -176,6 +243,28 @@ CREATE OR REPLACE CORTEX SEARCH SERVICE patient_search_service
 - **Clinical Decision Support**: Primary search interface for patient discovery
 - **API Access**: Python-based queries using Snowflake's core libraries
 - **Enhanced Fallback**: Intelligent text search with medical spell correction when needed
+
+## Batch Processing Pipeline
+
+### Architecture
+- **Data Source**: PATIENT_SUBSET table (1,000 records)
+- **Processing**: Parallel batch processing with configurable batch sizes
+- **Prompts**: Configurable prompt templates stored in configuration
+- **Re-processing**: Ability to update prompts and re-run analysis
+
+### Configurable Prompts
+All AI prompts are stored in a configuration file allowing:
+- Easy modification without code changes
+- A/B testing of different prompt strategies
+- Demo of prompt engineering impact
+- Version control of prompt iterations
+
+### Processing Features
+1. **Progress Tracking**: Real-time progress updates during batch processing
+2. **Error Handling**: Graceful handling of AI failures with retry logic
+3. **Incremental Processing**: Process only new/updated records
+4. **Parallel Execution**: Process multiple patients concurrently
+5. **Cost Tracking**: Monitor Cortex AI token usage
 
 ## Use Case Implementation Priority
 
@@ -205,13 +294,18 @@ CREATE OR REPLACE CORTEX SEARCH SERVICE patient_search_service
 
 #### 5. High-Cost Patient Analysis (Use Case 5)
 - **Pre-computed**: Cost drivers and utilization patterns
+- **Cost Estimation**: Extract procedures from notes and estimate costs
+- **Financial Impact**: Link clinical notes to financial outcomes
 - **Dashboard**: Aggregate views by department/condition
 - **Value**: Identifies intervention opportunities, reduces costs
 
-#### 6. Drug Interaction Analysis (Use Case 6)
-- **Pre-computed**: Medication lists and known interactions
+#### 6. Drug Interaction & Safety Analysis (Use Case 6)
+- **Medication Extraction**: Extract all medications and dosages from notes
+- **Interaction Checking**: Identify potential drug-drug interactions
+- **Contraindication Alerts**: Flag medications contraindicated with patient conditions
+- **Pre-computed**: Full medication lists with safety analysis
 - **Real-time**: Check new medication combinations
-- **Value**: Prevents adverse events, improves safety
+- **Value**: Prevents adverse events, improves patient safety
 
 ### Phase 3: Quality & Education
 
@@ -231,15 +325,15 @@ CREATE OR REPLACE CORTEX SEARCH SERVICE patient_search_service
 
 ```
 Healthcare AI Demo
-├── 1_🏥_Data_Foundation.py
-├── 2_🩺_Clinical_Decision_Support.py (PRIMARY DEMO)
-├── 3_🔬_AI_Processing_Live_Demo.py (REAL-TIME SHOWCASE)
-├── 4_📊_Population_Health_Analytics.py
-├── 5_🎓_Medical_Education.py
-├── 6_💊_Medication_Safety.py
-├── 7_📈_Quality_Metrics.py
-├── 8_🤖_AI_Model_Performance.py
-└── 9_📋_Demo_Guide.py
+├── 1_🏥_Data_Foundation.py (IMPLEMENTED)
+├── 2_🩺_Clinical_Decision_Support.py (IMPLEMENTED - PRIMARY DEMO)
+├── 3_🔬_AI_Processing_Live_Demo.py (IMPLEMENTED - REAL-TIME SHOWCASE)
+├── 4_📊_Population_Health_Analytics.py (TO BUILD)
+├── 5_💰_Cost_Analysis.py (TO BUILD - NEW)
+├── 6_💊_Medication_Safety.py (TO BUILD)
+├── 7_📈_Quality_Metrics.py (TO BUILD)
+├── 8_🤖_AI_Model_Performance.py (TO BUILD)
+└── 9_📋_Demo_Guide.py (TO BUILD)
 ```
 
 ### Page Details
@@ -273,11 +367,13 @@ Healthcare AI Demo
 - Cost analysis by condition
 - Outcome predictions
 
-#### Page 5: Medical Education
-- Case-based learning modules
-- Auto-generated quiz questions
-- Clinical reasoning exercises
-- Difficulty levels (student/resident/attending)
+#### Page 5: Cost Analysis
+- **Procedure Cost Estimation**: Extract procedures from notes and estimate costs
+- **Financial Impact Dashboard**: Link clinical activity to financial outcomes
+- **High-Cost Patient Identification**: Find patients with expensive care patterns
+- **Cost Driver Analysis**: Identify what clinical factors drive costs
+- **Department/Condition Cost Comparisons**: Benchmark analysis
+- **ROI Demonstration**: Show how AI insights can reduce costs
 
 #### Page 6: Medication Safety
 - Drug interaction checker

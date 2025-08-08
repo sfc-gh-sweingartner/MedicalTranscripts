@@ -228,10 +228,15 @@ def process_medical_note(note_text, patient_id, conn):
         2. Short-term risks (next 24-48 hours)
         3. Long-term risks requiring follow-up
         
-        Format as JSON with risk_level (HIGH/MEDIUM/LOW) for each category.
+        Respond with ONLY a valid JSON object. Do not include any prose, markdown, or HTML. Use exactly these keys and structure:
+        {{
+          "immediate": {{"risk_level": "HIGH|MEDIUM|LOW", "risks": ["..."]}},
+          "short_term": {{"risk_level": "HIGH|MEDIUM|LOW", "risks": ["..."]}},
+          "long_term": {{"risk_level": "HIGH|MEDIUM|LOW", "risks": ["..."]}}
+        }}
         """
         
-        risk_result = execute_cortex_complete(risk_prompt, "mixtral-8x7b", conn)
+        risk_result = execute_cortex_complete(risk_prompt, "mistral-large", conn)
         results['risk_assessment'] = risk_result
         
         # Stage 4: Clinical Recommendations
@@ -400,79 +405,41 @@ def display_results(results):
     with tab3:
         st.markdown("### Risk Assessment")
         risk_text = results.get('risk_assessment', 'No risk assessment generated')
-        
-        # Check if the text already contains HTML (AI returned formatted HTML)
-        if '<div' in risk_text or '<h4' in risk_text:
-            # AI returned formatted HTML - display it directly without additional wrapper
-            st.markdown(risk_text, unsafe_allow_html=True)
-        else:
-            # Try to parse and format JSON risk assessment
-            try:
-                import re
-                json_match = re.search(r'\{.*\}', risk_text, re.DOTALL)
-                if json_match:
-                    risk_data = json.loads(json_match.group())
-                    
-                    # Format the risk assessment nicely
-                    formatted_risk = ""
-                    
-                    for risk_category, details in risk_data.items():
-                        if isinstance(details, dict):
-                            risk_level = details.get('risk_level', 'UNKNOWN')
-                            risks = details.get('risks', [])
-                            
-                            # Format category name
-                            category_name = risk_category.replace('_', ' ').title()
-                            
-                            # Choose emoji and color based on risk level
-                            if risk_level == 'HIGH':
-                                emoji = "🔴"
-                                color = "#dc3545"
-                            elif risk_level == 'MEDIUM':
-                                emoji = "🟡"
-                                color = "#ffc107"
-                            else:
-                                emoji = "🟢"
-                                color = "#28a745"
-                            
-                            formatted_risk += f"""
-                            <div style="margin-bottom: 1rem;">
-                            <h4 style="color: {color};">{emoji} {category_name} (Risk Level: {risk_level})</h4>
-                            <ul>
-                            """
-                            
-                            for risk in risks:
-                                formatted_risk += f"<li>{risk}</li>"
-                            
-                            formatted_risk += "</ul></div>"
-                    
-                    # Look for additional notes after the JSON
-                    remaining_text = risk_text[json_match.end():].strip()
-                    if remaining_text:
-                        formatted_risk += f"<div style='margin-top: 1rem; font-style: italic;'>{remaining_text}</div>"
-                    
-                    st.markdown(f"""
-                    <div class="ai-result">
-                    {formatted_risk}
-                    </div>
-                    """, unsafe_allow_html=True)
-                else:
-                    # No JSON found, treat as plain text and format it nicely
-                    # Split by newlines and format as simple text
-                    formatted_text = risk_text.replace('\n', '<br>')
-                    st.markdown(f"""
-                    <div class="ai-result">
-                    {formatted_text}
-                    </div>
-                    """, unsafe_allow_html=True)
-            except (json.JSONDecodeError, Exception):
-                # Fallback to original text if parsing fails
-                formatted_text = risk_text.replace('\n', '<br>')
-                st.markdown(f"""
-                <div class="ai-result">
-                {formatted_text}
-                </div>
-                """, unsafe_allow_html=True)
+
+        from html import unescape
+        import re
+
+        decoded_text = unescape(risk_text)
+
+        # Prefer JSON-format rendering; otherwise show plain text
+        try:
+            json_match = re.search(r'\{.*\}', decoded_text, re.DOTALL)
+            if json_match:
+                risk_data = json.loads(json_match.group())
+
+                formatted_lines = []
+                for risk_category, details in risk_data.items():
+                    if isinstance(details, dict):
+                        risk_level = details.get('risk_level', 'UNKNOWN')
+                        risks = details.get('risks', [])
+                        category_name = risk_category.replace('_', ' ').title()
+                        emoji = '🔴' if risk_level == 'HIGH' else ('🟡' if risk_level == 'MEDIUM' else '🟢')
+                        formatted_lines.append(f"**{emoji} {category_name} (Risk Level: {risk_level})**")
+                        for risk in risks:
+                            formatted_lines.append(f"- {risk}")
+                        formatted_lines.append("")
+
+                remaining_text = decoded_text[json_match.end():].strip()
+                if remaining_text:
+                    formatted_lines.append(remaining_text)
+
+                st.markdown("\n".join(formatted_lines))
+            else:
+                # Show as plain text to avoid rendering any HTML
+                st.write(decoded_text)
+        except Exception:
+            # Fallback to plain text
+            st.write(decoded_text)
     
     with tab4:
         st.markdown("### Clinical Recommendations")

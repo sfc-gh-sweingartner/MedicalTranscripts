@@ -420,18 +420,28 @@ def main():
     st.markdown("---")
     st.markdown("## 🔍 Patient Search")
     
-    col1, col2 = st.columns([3, 1])
-    
-    with col1:
-        search_term = st.text_input(
-            "🤖 AI-Powered Patient Search",
-            placeholder="e.g., cardiac issues, seizure disorders, rare tumors, hypertension, brest cancer",
-            key="patient_search",
-            help="Uses Snowflake Cortex AI for semantic search. Handles medical terminology and common misspellings."
-        )
-    
-    with col2:
-        search_button = st.button("Search", type="primary", use_container_width=True)
+    # Use a form to enable Enter key functionality
+    with st.form(key="search_form"):
+        col1, col2 = st.columns([3, 1])
+        
+        with col1:
+            search_term = st.text_input(
+                "🤖 AI-Powered Patient Search",
+                placeholder="e.g., cardiac issues, seizure disorders, rare tumors, hypertension, brest cancer",
+                key="patient_search",
+                help="Uses Snowflake Cortex AI for semantic search. Handles medical terminology and common misspellings."
+            )
+        
+        with col2:
+            # Add custom CSS to vertically center button with text input
+            st.markdown("""
+            <style>
+            div[data-testid="column"]:nth-child(2) .stFormSubmitButton > button {
+                margin-top: 12px;
+            }
+            </style>
+            """, unsafe_allow_html=True)
+            search_button = st.form_submit_button("Search", type="primary", use_container_width=True)
     
     # Initialize search results in session state
     if 'search_results' not in st.session_state:
@@ -439,7 +449,7 @@ def main():
     if 'last_search_term' not in st.session_state:
         st.session_state.last_search_term = ""
     
-    # Perform search when button is clicked
+    # Perform search when form is submitted (button clicked or Enter pressed)
     if search_term and search_button:
         with st.spinner("🔍 Searching patients..."):
             st.session_state.search_results = search_patients_cortex(search_term, conn)
@@ -491,22 +501,7 @@ def main():
     elif search_term and search_button and st.session_state.search_results.empty:
         st.warning("No patients found matching your search criteria.")
     
-    # Quick access to demo scenarios
-    st.markdown("---")
-    st.markdown("## 🎯 Demo Scenarios")
-    
-    demo_scenarios = [
-        (163844, "Complex Diagnosis", "66-year-old with seizures and cardiac arrhythmia"),
-        (163840, "Pediatric Rare Disease", "11-year-old with multicentric peripheral ossifying fibroma"),
-        (163841, "Treatment Analysis", "41-year-old female with odontogenic myxoma")
-    ]
-    
-    cols = st.columns(3)
-    for i, (patient_id, title, desc) in enumerate(demo_scenarios):
-        with cols[i]:
-            if st.button(f"{title}\n{desc}", key=f"demo_{patient_id}", use_container_width=True):
-                st.session_state.selected_patient_id = patient_id
-                st.rerun()
+
     
     # Display selected patient details
     if 'selected_patient_id' in st.session_state:
@@ -550,9 +545,31 @@ def main():
                             else:
                                 st.error("Failed to generate summary.")
                 
-                # Show clinical notes
-                with st.expander("View Full Clinical Notes"):
-                    st.text(patient['PATIENT_NOTES'])
+                # Show clinical notes with custom styling for better readability
+                st.markdown("### 📝 Full Clinical Notes")
+                st.markdown("""
+                <style>
+                .clinical-notes-text {
+                    background-color: white;
+                    color: black;
+                    padding: 1rem;
+                    border-radius: 0.5rem;
+                    border: 1px solid #ddd;
+                    font-family: 'Courier New', monospace;
+                    font-size: 14px;
+                    line-height: 1.5;
+                    white-space: pre-wrap;
+                    max-height: 400px;
+                    overflow-y: auto;
+                }
+                </style>
+                """, unsafe_allow_html=True)
+                
+                st.markdown(f"""
+                <div class="clinical-notes-text">
+                {patient['PATIENT_NOTES']}
+                </div>
+                """, unsafe_allow_html=True)
             
             with tab2:
                 # Differential Diagnosis

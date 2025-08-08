@@ -84,7 +84,7 @@ def get_snowflake_connection():
 def execute_query(query: str, conn=None) -> pd.DataFrame:
     """
     Execute a query using either Snowpark session or regular connection
-    Returns pandas DataFrame
+    Returns pandas DataFrame with automatic retry on connection errors
     """
     if conn is None:
         conn = get_snowflake_connection()
@@ -99,8 +99,27 @@ def execute_query(query: str, conn=None) -> pd.DataFrame:
             result = pd.read_sql(query, conn)
         return result
     except Exception as e:
-        st.error(f"Query execution failed: {str(e)}")
-        raise
+        error_msg = str(e).lower()
+        # Check if it's a connection-related error
+        if any(err in error_msg for err in ['connection is closed', 'connection error', '250002']):
+            try:
+                # Attempt to get a fresh connection and retry once
+                st.warning("Connection lost, attempting to reconnect...")
+                fresh_conn = get_snowflake_connection()
+                if fresh_conn:
+                    if hasattr(fresh_conn, 'sql'):  # Snowpark session
+                        result = fresh_conn.sql(query).to_pandas()
+                    else:  # Regular connection
+                        result = pd.read_sql(query, fresh_conn)
+                    return result
+                else:
+                    raise Exception("Failed to reconnect to Snowflake")
+            except Exception as retry_e:
+                st.error(f"Query execution failed after retry: {str(retry_e)}")
+                raise retry_e
+        else:
+            st.error(f"Query execution failed: {str(e)}")
+            raise
 
 def safe_execute_query(query: str, conn=None, fallback_data=None) -> pd.DataFrame:
     """
